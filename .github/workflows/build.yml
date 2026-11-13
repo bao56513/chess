@@ -29,83 +29,76 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Unpack, Patch Chaquopy 15, Fetch Stockfish & Build APK
+      - name: Unpack Project, Fetch Stockfish & Build APK
         run: |
-          for z in *.zip; do
-            [ -f "$z" ] && unzip -oq "$z"
-          done
+          echo "=== Danh sach tep hien co trong kho ==="
+          find . -maxdepth 4 -not -path '*/.*'
+          find .github -maxdepth 3 2>/dev/null || true
 
-          SETTINGS_FILE=$(find . -maxdepth 5 -name "settings.gradle.kts" | head -n 1)
+          # Giai nen tat ca file .zip o bat ky thu muc nao (ke ca ben trong .github/workflows)
+          find . -maxdepth 4 -name "*.zip" -exec unzip -oq {} \;
+
+          SETTINGS_FILE=$(find . -maxdepth 6 -name "settings.gradle.kts" | head -n 1)
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: Khong tim thay settings.gradle.kts!"
+            echo "ERROR: Kho chua co file .zip ma nguon! Hay upload ChessV10_8Elite_APK_Project-v2.zip vao tab Code."
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+          echo "=== Tim thay project tai: $PROJECT_DIR ==="
           cd "$PROJECT_DIR"
 
           printf "android.useAndroidX=true\norg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8\n" > gradle.properties
           sed -i 's/package="com.v10.chesselite"//g' app/src/main/AndroidManifest.xml
 
-          python3 -c '
-          gradle_kts = """plugins {
-              id("com.android.application")
-              id("org.jetbrains.kotlin.android")
-              id("com.chaquo.python")
-          }
+          # Chi va app/build.gradle.kts neu dang dung ban v1 cu (giu nguyen ban v2)
+          if ! grep -q "chaquopy" app/build.gradle.kts; then
+            python3 -c '
+            gradle_kts = """plugins {
+                id("com.android.application")
+                id("org.jetbrains.kotlin.android")
+                id("com.chaquo.python")
+            }
+            android {
+                namespace = "com.v10.chesselite"
+                compileSdk = 34
+                defaultConfig {
+                    applicationId = "com.v10.chesselite"
+                    minSdk = 30
+                    targetSdk = 34
+                    versionCode = 11
+                    versionName = "10.2-8Elite-Ultra"
+                    ndk { abiFilters += listOf("arm64-v8a") }
+                }
+                packaging { jniLibs { useLegacyPackaging = true } }
+                compileOptions {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
+                kotlinOptions { jvmTarget = "17" }
+            }
+            chaquopy {
+                defaultConfig {
+                    version = "3.10"
+                    buildPython("python3")
+                    pip {
+                        install("numpy")
+                        install("opencv-python-headless")
+                        install("chess")
+                    }
+                }
+            }
+            dependencies {
+                implementation("androidx.core:core-ktx:1.12.0")
+                implementation("androidx.appcompat:appcompat:1.6.1")
+                implementation("com.google.android.material:material:1.11.0")
+            }
+            """
+            open("app/build.gradle.kts", "w").write(gradle_kts)
+            '
+          fi
 
-          android {
-              namespace = "com.v10.chesselite"
-              compileSdk = 34
-
-              defaultConfig {
-                  applicationId = "com.v10.chesselite"
-                  minSdk = 30
-                  targetSdk = 34
-                  versionCode = 10
-                  versionName = "10.0-8Elite"
-
-                  ndk {
-                      abiFilters += listOf("arm64-v8a")
-                  }
-              }
-
-              packaging {
-                  jniLibs {
-                      useLegacyPackaging = true
-                  }
-              }
-
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-          }
-
-          chaquopy {
-              defaultConfig {
-                  version = "3.10"
-                  buildPython("python3")
-                  pip {
-                      install("numpy")
-                      install("opencv-python-headless")
-                      install("chess")
-                  }
-              }
-          }
-
-          dependencies {
-              implementation("androidx.core:core-ktx:1.12.0")
-              implementation("androidx.appcompat:appcompat:1.6.1")
-              implementation("com.google.android.material:material:1.11.0")
-          }
-          """
-          open("app/build.gradle.kts", "w").write(gradle_kts)
-          '
-
+          # Tai va dong goi Stockfish ARMv8-DotProd cho Snapdragon 8 Elite
           mkdir -p app/src/main/jniLibs/arm64-v8a
           if [ ! -f "app/src/main/jniLibs/arm64-v8a/libstockfish.so" ]; then
             SF_URL=$(curl -sL "https://api.github.com/repos/official-stockfish/Stockfish/releases?per_page=5" | grep -oE 'https://[^"]+android-armv8-dotprod[^"]*\.tar' | head -n 1)
@@ -119,6 +112,7 @@ jobs:
             chmod +x app/src/main/jniLibs/arm64-v8a/libstockfish.so
           fi
 
+          ls -lh app/src/main/jniLibs/arm64-v8a/libstockfish.so
           gradle assembleDebug
 
       - name: Upload APK Artifact
