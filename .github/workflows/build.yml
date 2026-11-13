@@ -19,12 +19,17 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Python 3.10 for Chaquopy
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Setup Gradle 8.5
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.5'
 
-      - name: Unpack Project, Fetch Stockfish & Build APK
+      - name: Unpack, Patch Chaquopy 15, Fetch Stockfish & Build APK
         run: |
           for z in *.zip; do
             [ -f "$z" ] && unzip -oq "$z"
@@ -38,7 +43,68 @@ jobs:
 
           PROJECT_DIR=$(dirname "$SETTINGS_FILE")
           cd "$PROJECT_DIR"
+
           printf "android.useAndroidX=true\norg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8\n" > gradle.properties
+          sed -i 's/package="com.v10.chesselite"//g' app/src/main/AndroidManifest.xml
+
+          python3 -c '
+          gradle_kts = """plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+              id("com.chaquo.python")
+          }
+
+          android {
+              namespace = "com.v10.chesselite"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.v10.chesselite"
+                  minSdk = 30
+                  targetSdk = 34
+                  versionCode = 10
+                  versionName = "10.0-8Elite"
+
+                  ndk {
+                      abiFilters += listOf("arm64-v8a")
+                  }
+              }
+
+              packaging {
+                  jniLibs {
+                      useLegacyPackaging = true
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          chaquopy {
+              defaultConfig {
+                  version = "3.10"
+                  buildPython("python3")
+                  pip {
+                      install("numpy")
+                      install("opencv-python-headless")
+                      install("chess")
+                  }
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.12.0")
+              implementation("androidx.appcompat:appcompat:1.6.1")
+              implementation("com.google.android.material:material:1.11.0")
+          }
+          """
+          open("app/build.gradle.kts", "w").write(gradle_kts)
+          '
 
           mkdir -p app/src/main/jniLibs/arm64-v8a
           if [ ! -f "app/src/main/jniLibs/arm64-v8a/libstockfish.so" ]; then
